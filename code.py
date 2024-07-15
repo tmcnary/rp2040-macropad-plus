@@ -26,6 +26,7 @@ from adafruit_macropad import MacroPad
 # CONFIGURABLES ------------------------
 
 MACRO_FOLDER = '/macros'
+MENU_ITEMS = 5  # Number of menu items to display (odd number)
 
 
 # CLASSES AND FUNCTIONS ----------------
@@ -77,13 +78,32 @@ def read_macro_files():
 def show_menu(apps, current_app):
     """ Display the app selection menu """
     menu_group = displayio.Group()
-    for i, app in enumerate(apps):
-        color = 0xFFFFFF if i == current_app else 0x888888
-        menu_label = label.Label(terminalio.FONT, text=app.name, color=color,
-                                 anchored_position=(macropad.display.width//2, i*12),
-                                 anchor_point=(0.5, 0))
+
+    # Calculate the range of items to display
+    total_items = len(apps)
+    half_display = MENU_ITEMS // 2
+    start_index = max(0, min(current_app - half_display, total_items - MENU_ITEMS))
+    end_index = min(start_index + MENU_ITEMS, total_items)
+
+    # Background for selected item
+    selected_bg = Rect(0, (MENU_ITEMS // 2) * 12, macropad.display.width, 12, fill=0xFFFFFF)
+    menu_group.append(selected_bg)
+
+    # Create labels for the visible items
+    for i in range(start_index, end_index):
+        is_selected = (i == current_app)
+        text = apps[i].name
+        y_position = ((i - start_index) * 12) + 6  # Center text vertically in each row
+        menu_label = label.Label(
+            terminalio.FONT,
+            text=text,
+            color=0x000000 if is_selected else 0xFFFFFF,
+            anchored_position=(macropad.display.width - 1, y_position),
+            anchor_point=(1.0, 0.5)  # Right-align the text
+        )
         menu_group.append(menu_label)
-    macropad.display.show(menu_group)
+
+    macropad.display.root_group = menu_group
     macropad.display.refresh()
 
 
@@ -107,7 +127,7 @@ group.append(Rect(0, 0, macropad.display.width, 12, fill=0xFFFFFF))
 group.append(label.Label(terminalio.FONT, text='', color=0x000000,
                          anchored_position=(macropad.display.width//2, -1),
                          anchor_point=(0.5, 0.0)))
-macropad.display.show(group)
+macropad.display.root_group = group
 
 # Load all the macro key setups from .py files in MACRO_FOLDER
 apps = read_macro_files()
@@ -131,6 +151,7 @@ while True:
 
     if position != last_position:
         # Encoder turned, show menu
+        app_index = position % len(apps)
         show_menu(apps, app_index)
         menu_active = True
         menu_timeout = time.monotonic() + 3  # 3 second timeout
@@ -149,13 +170,13 @@ while True:
                 # Selection made
                 menu_active = False
                 apps[app_index].switch()
-                macropad.display.show(group)
+                macropad.display.root_group = group
                 macropad.display.refresh()
 
             if time.monotonic() > menu_timeout:
                 # Timeout, return to current app
                 menu_active = False
-                macropad.display.show(group)
+                macropad.display.root_group = group
                 macropad.display.refresh()
 
         last_position = position
