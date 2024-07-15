@@ -10,12 +10,14 @@ set, press MACROPAD keys to send key sequences and other USB protocols.
 This version includes a new app selection mechanism:
 - Turning the encoder activates a menu with a list of available macros.
 - Turning the encoder scrolls through the list and highlights macros.
-- Pressing the encoder button selects the highlighted macro.
+- Pressing the encoder button selects the highlighted macro and flashes it.
 - If no selection is made within 3 seconds, it returns to the current macro.
+- Scrolling is continuous, wrapping around at the end of the list.
 """
 
 import os
 import time
+import random
 import displayio
 import terminalio
 from adafruit_display_shapes.rect import Rect
@@ -75,35 +77,89 @@ def read_macro_files():
     return apps
 
 
-def show_menu(apps, current_app):
+def show_menu(apps, current_app, inverse=False):
     """ Display the app selection menu """
     menu_group = displayio.Group()
 
     # Calculate the range of items to display
     total_items = len(apps)
     half_display = MENU_ITEMS // 2
-    start_index = max(0, min(current_app - half_display, total_items - MENU_ITEMS))
-    end_index = min(start_index + MENU_ITEMS, total_items)
-
-    # Background for selected item
-    selected_bg = Rect(0, (MENU_ITEMS // 2) * 12, macropad.display.width, 12, fill=0xFFFFFF)
-    menu_group.append(selected_bg)
-
+    
     # Create labels for the visible items
-    for i in range(start_index, end_index):
-        is_selected = (i == current_app)
-        text = apps[i].name
-        y_position = ((i - start_index) * 12) + 6  # Center text vertically in each row
+    for i in range(MENU_ITEMS):
+        # Calculate the true index in the apps list, allowing for wrap-around
+        true_index = (current_app - half_display + i) % total_items
+        is_selected = (i == half_display)
+        text = apps[true_index].name
+        y_position = i * 12 + 6  # Center text vertically in each row
+        
+        if is_selected:
+            # Add background for selected item
+            selected_bg = Rect(0, i * 12, macropad.display.width, 12, fill=0x000000 if inverse else 0xFFFFFF)
+            menu_group.append(selected_bg)
+        
         menu_label = label.Label(
             terminalio.FONT,
             text=text,
-            color=0x000000 if is_selected else 0xFFFFFF,
+            color=0xFFFFFF if (inverse and is_selected) else (0x000000 if is_selected else 0xFFFFFF),
             anchored_position=(macropad.display.width - 1, y_position),
             anchor_point=(1.0, 0.5)  # Right-align the text
         )
         menu_group.append(menu_label)
 
     macropad.display.root_group = menu_group
+    macropad.display.refresh()
+
+
+def flash_selected(apps, current_app):
+    """ Flash the selected item """
+    for _ in range(2):  # Flash 2 times
+        show_menu(apps, current_app, inverse=True)
+        time.sleep(0.05)
+        show_menu(apps, current_app, inverse=False)
+        time.sleep(0.05)
+
+
+def encoder_test_animation():
+    """ Display a fun animation for encoder test """
+    width = macropad.display.width
+    height = macropad.display.height
+    
+    # Create a bitmap with 2 colors
+    bitmap = displayio.Bitmap(width, height, 2)
+    palette = displayio.Palette(2)
+    palette[0] = 0x000000  # Black
+    palette[1] = 0xFFFFFF  # White
+    
+    # Create a TileGrid using the Bitmap and Palette
+    tile_grid = displayio.TileGrid(bitmap, pixel_shader=palette)
+    group = displayio.Group()
+    group.append(tile_grid)
+    
+    # Add a "Test" label
+    test_label = label.Label(terminalio.FONT, text="Encoder Test", color=0xFFFFFF)
+    test_label.anchor_point = (0.5, 0.5)
+    test_label.anchored_position = (width // 2, height // 2)
+    group.append(test_label)
+    
+    macropad.display.root_group = group
+    
+    start_time = time.monotonic()
+    while time.monotonic() - start_time < 3:  # Run for 3 seconds
+        # Clear the bitmap
+        bitmap.fill(0)
+        
+        # Draw some random pixels
+        for _ in range(50):
+            x = random.randint(0, width - 1)
+            y = random.randint(0, height - 1)
+            bitmap[x, y] = 1
+        
+        macropad.display.refresh()
+        time.sleep(0.1)
+    
+    # Return to the normal display
+    macropad.display.root_group = group
     macropad.display.refresh()
 
 
@@ -167,7 +223,8 @@ while True:
                 menu_timeout = time.monotonic() + 3  # Reset timeout
 
             if macropad.encoder_switch_debounced.pressed:
-                # Selection made
+                # Selection made, flash the selected item
+                flash_selected(apps, app_index)
                 menu_active = False
                 apps[app_index].switch()
                 macropad.display.root_group = group
@@ -227,6 +284,8 @@ while True:
                                 macropad.stop_tone()
                         elif 'play' in item:
                             macropad.play_file(item['play'])
+                    elif callable(item):
+                        item()
             else:
                 # Release any still-pressed keys, consumer codes, mouse buttons
                 for item in sequence:
