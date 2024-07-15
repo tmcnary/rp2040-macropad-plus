@@ -31,9 +31,8 @@ class App:
 
     def switch(self):
         group[13].text = self.name
+        group[13].color = 0xFFFFFF
         if self.name:
-            rect.fill = 0xFFFFFF
-        else:
             rect.fill = 0x000000
         for i in range(12):
             if i < len(self.macros):
@@ -67,18 +66,31 @@ def load_apps():
 
 def show_app_selection(apps, selected_index):
     # Clear the display
-    for i in range(12):
+    for i in range(14):
         group[i].text = ''
     
-    # Show a subset of apps around the selected index
-    start = max(0, selected_index - 2)
-    end = min(len(apps), start + 5)
+    rect.fill = 0x000000  # Set background to black
+    
+    # Calculate which apps to show
+    start = (selected_index // 4) * 4
+    end = min(len(apps), start + 4)
+    
+    # Show apps
     for i, app in enumerate(apps[start:end], start=start):
         group[i - start].text = app.name
+        group[i - start].anchored_position = (5, (i - start + 1) * 8)
+        group[i - start].scale = 1
         if i == selected_index:
-            group[i - start].color = 0xFFFF00
+            group[i - start].color = 0xFFFF00  # Yellow for selected
         else:
-            group[i - start].color = 0xFFFFFF
+            group[i - start].color = 0xFFFFFF  # White for unselected
+    
+    # Show selection indicator
+    group[13].text = f"{selected_index + 1}/{len(apps)}"
+    group[13].anchored_position = (macropad.display.width - 5, macropad.display.height - 5)
+    group[13].anchor_point = (1.0, 1.0)
+    group[13].scale = 1
+    group[13].color = 0xFFFFFF
     
     macropad.display.refresh()
 
@@ -112,19 +124,14 @@ macropad.pixels.auto_write = False
 
 # Set up displayio group with all the labels
 group = displayio.Group()
-for key_index in range(12):
+for key_index in range(14):
     x = key_index % 3
     y = key_index // 3
     group.append(label.Label(terminalio.FONT, text='', color=0xFFFFFF,
-                             anchored_position=((macropad.display.width - 1) * x / 2,
-                                                macropad.display.height - 1 -
-                                                (3 - y) * 12),
-                             anchor_point=(x / 2, 1.0)))
-rect = Rect(0, 0, macropad.display.width, 13, fill=0xFFFFFF)
-group.append(rect)
-group.append(label.Label(terminalio.FONT, text='', color=0x000000,
-                         anchored_position=(macropad.display.width//2, 0),
-                         anchor_point=(0.5, 0.0)))
+                             anchored_position=(0, 0),
+                             anchor_point=(0, 0)))
+rect = Rect(0, 0, macropad.display.width, macropad.display.height, fill=0x000000)
+group.insert(0, rect)  # Add the rectangle as the background
 macropad.display.root_group = group
 
 # Load all the macro key setups from .py files in MACRO_FOLDER
@@ -136,29 +143,19 @@ if not apps:
     while True:
         pass
 
-last_position = None
+last_position = macropad.encoder
 last_encoder_switch = macropad.encoder_switch_debounced.pressed
 app_index = 0
 apps[app_index].switch()
 
 # MAIN LOOP ----------------------------
 while True:
-    # Handle encoder button
-    macropad.encoder_switch_debounced.update()
-    encoder_switch = macropad.encoder_switch_debounced.pressed
-    if encoder_switch != last_encoder_switch:
-        last_encoder_switch = encoder_switch
-        if encoder_switch:
-            app_index = select_app(apps, app_index)
-            apps[app_index].switch()
-        continue
-
-    # Handle encoder rotation (now only used within an app)
     position = macropad.encoder
     if position != last_position:
-        # Handle rotation within the current app
-        # (You can add app-specific behavior here if needed)
+        app_index = select_app(apps, app_index)
+        apps[app_index].switch()
         last_position = position
+        continue
 
     # Handle key presses
     event = macropad.keys.events.get()
