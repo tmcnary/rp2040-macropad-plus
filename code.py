@@ -1,15 +1,18 @@
-# SPDX-FileCopyrightText: 2021 Phillip Burgess for Adafruit Industries
-#
-# SPDX-License-Identifier: MIT
-
 """
+SPDX-FileCopyrightText: 2021 Phillip Burgess for Adafruit Industries
+SPDX-License-Identifier: MIT
+
 A macro/hotkey program for Adafruit MACROPAD. Macro setups are stored in the
 /macros folder (configurable below), load up just the ones you're likely to
 use. Plug into computer's USB port, use dial to select an application macro
 set, press MACROPAD keys to send key sequences and other USB protocols.
-"""
 
-# pylint: disable=import-error, unused-import, too-few-public-methods
+This version includes a new app selection mechanism:
+- Turning the encoder activates a menu with a list of available macros.
+- Turning the encoder scrolls through the list and highlights macros.
+- Pressing the encoder button selects the highlighted macro.
+- If no selection is made within 3 seconds, it returns to the current macro.
+"""
 
 import os
 import time
@@ -19,26 +22,30 @@ from adafruit_display_shapes.rect import Rect
 from adafruit_display_text import label
 from adafruit_macropad import MacroPad
 
+
 # CONFIGURABLES ------------------------
+
 MACRO_FOLDER = '/macros'
-SELECTION_TIMEOUT = 3  # seconds
+
 
 # CLASSES AND FUNCTIONS ----------------
+
 class App:
+    """ Class representing a host-side application, for which we have a set
+        of macro sequences. """
     def __init__(self, appdata):
         self.name = appdata['name']
         self.macros = appdata['macros']
 
     def switch(self):
-        group[13].text = self.name
-        group[13].color = 0xFFFFFF
-        if self.name:
-            rect.fill = 0x000000
+        """ Activate application settings; update OLED labels and LED
+            colors. """
+        group[13].text = self.name   # Application name
         for i in range(12):
-            if i < len(self.macros):
+            if i < len(self.macros): # Key in use, set label + LED color
                 macropad.pixels[i] = self.macros[i][0]
                 group[i].text = self.macros[i][1]
-            else:
+            else:  # Key not in use, no label or LED
                 macropad.pixels[i] = 0
                 group[i].text = ''
         macropad.keyboard.release_all()
@@ -48,7 +55,9 @@ class App:
         macropad.pixels.show()
         macropad.display.refresh()
 
-def load_apps():
+
+def read_macro_files():
+    """ Read all the macro key setups from .py files in MACRO_FOLDER """
     apps = []
     files = os.listdir(MACRO_FOLDER)
     files.sort()
@@ -64,78 +73,44 @@ def load_apps():
                 traceback.print_exception(err, err, err.__traceback__)
     return apps
 
-def show_app_selection(apps, selected_index):
-    # Clear the display
-    for i in range(14):
-        group[i].text = ''
-    
-    rect.fill = 0x000000  # Set background to black
-    
-    # Calculate which apps to show
-    start = (selected_index // 4) * 4
-    end = min(len(apps), start + 4)
-    
-    # Show apps
-    for i, app in enumerate(apps[start:end], start=start):
-        group[i - start].text = app.name
-        group[i - start].anchored_position = (5, (i - start + 1) * 8)
-        group[i - start].scale = 1
-        if i == selected_index:
-            group[i - start].color = 0xFFFF00  # Yellow for selected
-        else:
-            group[i - start].color = 0xFFFFFF  # White for unselected
-    
-    # Show selection indicator
-    group[13].text = f"{selected_index + 1}/{len(apps)}"
-    group[13].anchored_position = (macropad.display.width - 5, macropad.display.height - 5)
-    group[13].anchor_point = (1.0, 1.0)
-    group[13].scale = 1
-    group[13].color = 0xFFFFFF
-    
+
+def show_menu(apps, current_app):
+    """ Display the app selection menu """
+    menu_group = displayio.Group()
+    for i, app in enumerate(apps):
+        color = 0xFFFFFF if i == current_app else 0x888888
+        menu_label = label.Label(terminalio.FONT, text=app.name, color=color,
+                                 anchored_position=(macropad.display.width//2, i*12),
+                                 anchor_point=(0.5, 0))
+        menu_group.append(menu_label)
+    macropad.display.show(menu_group)
     macropad.display.refresh()
 
-def select_app(apps, current_app_index):
-    selected_index = current_app_index
-    show_app_selection(apps, selected_index)
-    last_encoder_position = macropad.encoder
-    selection_start_time = time.monotonic()
-
-    while True:
-        current_position = macropad.encoder
-        if current_position != last_encoder_position:
-            selected_index = (selected_index + current_position - last_encoder_position) % len(apps)
-            show_app_selection(apps, selected_index)
-            last_encoder_position = current_position
-            selection_start_time = time.monotonic()
-
-        macropad.encoder_switch_debounced.update()
-        if macropad.encoder_switch_debounced.pressed:
-            return selected_index
-
-        if time.monotonic() - selection_start_time > SELECTION_TIMEOUT:
-            return current_app_index
-
-        time.sleep(0.01)
 
 # INITIALIZATION -----------------------
+
 macropad = MacroPad()
 macropad.display.auto_refresh = False
 macropad.pixels.auto_write = False
 
 # Set up displayio group with all the labels
 group = displayio.Group()
-for key_index in range(14):
+for key_index in range(12):
     x = key_index % 3
     y = key_index // 3
     group.append(label.Label(terminalio.FONT, text='', color=0xFFFFFF,
-                             anchored_position=(0, 0),
-                             anchor_point=(0, 0)))
-rect = Rect(0, 0, macropad.display.width, macropad.display.height, fill=0x000000)
-group.insert(0, rect)  # Add the rectangle as the background
-macropad.display.root_group = group
+                             anchored_position=((macropad.display.width - 1) * x / 2,
+                                                macropad.display.height - 1 -
+                                                (3 - y) * 12),
+                             anchor_point=(x / 2, 1.0)))
+group.append(Rect(0, 0, macropad.display.width, 12, fill=0xFFFFFF))
+group.append(label.Label(terminalio.FONT, text='', color=0x000000,
+                         anchored_position=(macropad.display.width//2, -1),
+                         anchor_point=(0.5, 0.0)))
+macropad.display.show(group)
 
 # Load all the macro key setups from .py files in MACRO_FOLDER
-apps = load_apps()
+apps = read_macro_files()
 
 if not apps:
     group[13].text = 'NO MACRO FILES FOUND'
@@ -143,21 +118,49 @@ if not apps:
     while True:
         pass
 
-last_position = macropad.encoder
-last_encoder_switch = macropad.encoder_switch_debounced.pressed
+last_position = None
 app_index = 0
 apps[app_index].switch()
 
-# MAIN LOOP ----------------------------
-while True:
-    position = macropad.encoder
-    if position != last_position:
-        app_index = select_app(apps, app_index)
-        apps[app_index].switch()
-        last_position = position
-        continue
 
-    # Handle key presses
+# MAIN LOOP ----------------------------
+
+while True:
+    # Read encoder position.
+    position = macropad.encoder
+
+    if position != last_position:
+        # Encoder turned, show menu
+        show_menu(apps, app_index)
+        menu_active = True
+        menu_timeout = time.monotonic() + 3  # 3 second timeout
+
+        while menu_active:
+            macropad.encoder_switch_debounced.update()
+            current_position = macropad.encoder
+            if current_position != position:
+                # Scroll through menu
+                position = current_position
+                app_index = position % len(apps)
+                show_menu(apps, app_index)
+                menu_timeout = time.monotonic() + 3  # Reset timeout
+
+            if macropad.encoder_switch_debounced.pressed:
+                # Selection made
+                menu_active = False
+                apps[app_index].switch()
+                macropad.display.show(group)
+                macropad.display.refresh()
+
+            if time.monotonic() > menu_timeout:
+                # Timeout, return to current app
+                menu_active = False
+                macropad.display.show(group)
+                macropad.display.refresh()
+
+        last_position = position
+
+    # Handle key events
     event = macropad.keys.events.get()
     if event:
         key_number = event.key_number
@@ -166,7 +169,7 @@ while True:
         if key_number < len(apps[app_index].macros):
             sequence = apps[app_index].macros[key_number][2]
             if pressed:
-                if key_number < 12:
+                if key_number < 12: # No pixel for encoder button
                     macropad.pixels[key_number] = 0xFFFFFF
                     macropad.pixels.show()
                 for item in sequence:
@@ -204,7 +207,7 @@ while True:
                         elif 'play' in item:
                             macropad.play_file(item['play'])
             else:
-                # Release actions
+                # Release any still-pressed keys, consumer codes, mouse buttons
                 for item in sequence:
                     if isinstance(item, int):
                         if item >= 0:
@@ -216,8 +219,6 @@ while True:
                         elif 'tone' in item:
                             macropad.stop_tone()
                 macropad.consumer_control.release()
-                if key_number < 12:
+                if key_number < 12: # No pixel for encoder button
                     macropad.pixels[key_number] = apps[app_index].macros[key_number][0]
                     macropad.pixels.show()
-
-    time.sleep(0.01)  # Small delay to keep things responsive but not too busy
