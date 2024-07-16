@@ -4,10 +4,7 @@ SPDX-License-Identifier: MIT
 
 A macro/hotkey program for Adafruit MACROPAD. Macro setups are stored in the
 /macros folder (configurable below), with support for subfolder grouping.
-Plug into computer's USB port, use dial to select an application macro
-set, press MACROPAD keys to send key sequences and other USB protocols.
-
-This version includes a Favorites functionality for quick access to preferred macros.
+This version includes Favorites functionality and Tap-Dance feature for extended button functionality.
 """
 
 import os
@@ -24,6 +21,8 @@ from adafruit_macropad import MacroPad
 MACRO_FOLDER = '/macros'
 MENU_ITEMS = 5  # Number of menu items to display (odd number)
 FAVORITES_FILE = '/favorites.json'
+TAP_DANCE_TIMEOUT = 0.3  # Time window for double tap (in seconds)
+HOLD_TIMEOUT = 0.5  # Time threshold for long press (in seconds)
 
 # CLASSES AND FUNCTIONS ----------------
 
@@ -159,6 +158,72 @@ def get_favorite(key):
                 return app
     return None
 
+def execute_macro(sequence):
+    for item in sequence:
+        if isinstance(item, int):
+            if item >= 0:
+                macropad.keyboard.press(item)
+            else:
+                macropad.keyboard.release(-item)
+        elif isinstance(item, float):
+            time.sleep(item)
+        elif isinstance(item, str):
+            macropad.keyboard_layout.write(item)
+        elif isinstance(item, list):
+            for code in item:
+                if isinstance(code, int):
+                    macropad.consumer_control.release()
+                    macropad.consumer_control.press(code)
+                if isinstance(code, float):
+                    time.sleep(code)
+        elif isinstance(item, dict):
+            if 'buttons' in item:
+                if item['buttons'] >= 0:
+                    macropad.mouse.press(item['buttons'])
+                else:
+                    macropad.mouse.release(-item['buttons'])
+            macropad.mouse.move(item['x'] if 'x' in item else 0,
+                                item['y'] if 'y' in item else 0,
+                                item['wheel'] if 'wheel' in item else 0)
+            if 'tone' in item:
+                if item['tone'] > 0:
+                    macropad.stop_tone()
+                    macropad.start_tone(item['tone'])
+                else:
+                    macropad.stop_tone()
+            elif 'play' in item:
+                macropad.play_file(item['play'])
+
+def handle_tap_dance(key_number, pressed):
+    global last_press_time, tap_count, is_long_press
+
+    current_time = time.monotonic()
+    
+    if pressed:
+        if current_time - last_press_time <= TAP_DANCE_TIMEOUT:
+            tap_count += 1
+        else:
+            tap_count = 1
+        last_press_time = current_time
+        is_long_press = False
+    else:
+        if current_time - last_press_time >= HOLD_TIMEOUT:
+            if is_long_press:
+                # Tap and Hold (Action 4)
+                execute_macro(current_app.macros[key_number][2][3])
+            else:
+                # Hold (Action 3)
+                execute_macro(current_app.macros[key_number][2][2])
+        elif tap_count == 1:
+            # Single Tap (Action 1)
+            execute_macro(current_app.macros[key_number][2][0])
+        elif tap_count == 2:
+            # Double Tap (Action 2)
+            execute_macro(current_app.macros[key_number][2][1])
+        
+        tap_count = 0
+        is_long_press = False
+
 # INITIALIZATION -----------------------
 
 macropad = MacroPad()
@@ -195,6 +260,9 @@ current_app.switch()
 
 last_encoder_position = macropad.encoder
 setting_favorite = False
+last_press_time = 0
+tap_count = 0
+is_long_press = False
 
 while True:
     macropad.encoder_switch_debounced.update()
@@ -228,9 +296,9 @@ while True:
         pressed = event.pressed
 
         if key_number < len(current_app.macros):
-            sequence = current_app.macros[key_number][2]
-            if pressed:
-                if current_app.name == 'Favorites':
+            if current_app.name == 'Favorites':
+                if pressed:
+                    sequence = current_app.macros[key_number][2]
                     if sequence[0] == 'SET_FAVORITE':
                         setting_favorite = True
                         group[13].text = 'Set Favorite'
@@ -244,63 +312,25 @@ while True:
                         if fav_app:
                             current_app = fav_app
                             current_app.switch()
-                elif setting_favorite:
+            elif setting_favorite:
+                if pressed:
                     set_favorite(key_number, current_app)
                     setting_favorite = False
                     group[13].text = 'Favorite Set'
                     macropad.display.refresh()
                     time.sleep(1)
                     current_app.switch()
-                else:
-                    if key_number < 12:
-                        macropad.pixels[key_number] = 0xFFFFFF
-                        macropad.pixels.show()
-                    for item in sequence:
-                        if isinstance(item, int):
-                            if item >= 0:
-                                macropad.keyboard.press(item)
-                            else:
-                                macropad.keyboard.release(-item)
-                        elif isinstance(item, float):
-                            time.sleep(item)
-                        elif isinstance(item, str):
-                            macropad.keyboard_layout.write(item)
-                        elif isinstance(item, list):
-                            for code in item:
-                                if isinstance(code, int):
-                                    macropad.consumer_control.release()
-                                    macropad.consumer_control.press(code)
-                                if isinstance(code, float):
-                                    time.sleep(code)
-                        elif isinstance(item, dict):
-                            if 'buttons' in item:
-                                if item['buttons'] >= 0:
-                                    macropad.mouse.press(item['buttons'])
-                                else:
-                                    macropad.mouse.release(-item['buttons'])
-                            macropad.mouse.move(item['x'] if 'x' in item else 0,
-                                                item['y'] if 'y' in item else 0,
-                                                item['wheel'] if 'wheel' in item else 0)
-                            if 'tone' in item:
-                                if item['tone'] > 0:
-                                    macropad.stop_tone()
-                                    macropad.start_tone(item['tone'])
-                                else:
-                                    macropad.stop_tone()
-                            elif 'play' in item:
-                                macropad.play_file(item['play'])
             else:
-                for item in sequence:
-                    if isinstance(item, int):
-                        if item >= 0:
-                            macropad.keyboard.release(item)
-                    elif isinstance(item, dict):
-                        if 'buttons' in item:
-                            if item['buttons'] >= 0:
-                                macropad.mouse.release(item['buttons'])
-                        elif 'tone' in item:
-                            macropad.stop_tone()
-                macropad.consumer_control.release()
-                if key_number < 12:
-                    macropad.pixels[key_number] = current_app.macros[key_number][0]
-                    macropad.pixels.show()
+                handle_tap_dance(key_number, pressed)
+
+            if pressed and key_number < 12:
+                macropad.pixels[key_number] = 0xFFFFFF
+                macropad.pixels.show()
+            elif not pressed and key_number < 12:
+                macropad.pixels[key_number] = current_app.macros[key_number][0]
+                macropad.pixels.show()
+
+    # Check for long press
+    if time.monotonic() - last_press_time >= HOLD_TIMEOUT and not is_long_press:
+        is_long_press = True
+        # This will trigger the Hold action when the key is released
